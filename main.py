@@ -2,13 +2,14 @@
 # -*- coding: utf-8 -*-
 """
 Ингосстрах: Telegram-бот для менеджера
-v1.6: Исправлен IndexError, добавлено удаление предыдущих сообщений после анкеты
+v1.6: Экран MarkdownV2 с экранированием, активная ссылка user_id, очистка сообщений
 """
 
 import logging
 import time
 from datetime import datetime
 from urllib.parse import quote
+import re
 
 from telebot import TeleBot, types
 from telebot.apihelper import ApiTelegramException
@@ -16,12 +17,11 @@ from telebot.apihelper import ApiTelegramException
 # ====================== Конфигурация ======================
 TOKEN      = "7373585495:AAEK4JwHdbHzfQwfr2zNNknZDwpObCnPXZ0"
 WHATSAPP   = "+79898325577"       # WhatsApp менеджера
-MANAGER_ID = 6983437462           # Telegram ID менеджера для копий
+MANAGER_ID = 6983437462           # Telegram ID менеджера
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# Проверка токена
 if ':' not in TOKEN:
     logger.critical("Ошибка: Токен не содержит двоеточия! Укажите полный токен.")
     exit(1)
@@ -100,16 +100,28 @@ CAR_MODELS = {
     'Другая': ['Другая']
 }
 
-# ====================== Вспомогательные функции ======================
+def escape_markdown(text):
+    escape_chars = r'_*\[\]()~`>#+-=|{}.!'
+    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
+
 def ensure_session(cid):
     if cid not in sessions:
-        sessions[cid] = {"step": "profile", "cat": None, "idx": 0, "answers": {}, "last": None, "temp_brand": None, "pending_input": None, "message_ids": []}  # Добавлен список для IDs сообщений
+        sessions[cid] = {
+            "step": "profile",
+            "cat": None,
+            "idx": 0,
+            "answers": {},
+            "last": None,
+            "temp_brand": None,
+            "pending_input": None,
+            "message_ids": []
+        }
 
 def safe_send(cid, *a, **kw):
     for _ in range(3):
         try:
             msg = bot.send_message(cid, *a, **kw)
-            sessions.get(cid, {})["message_ids"].append(msg.message_id)  # Сохраняем ID сообщения для последующего удаления
+            sessions.get(cid, {}).get("message_ids", []).append(msg.message_id)
             return msg
         except ApiTelegramException as e:
             logger.warning(f"send_message API error: {e}")
@@ -124,30 +136,28 @@ def delete_previous_messages(cid):
                 bot.delete_message(cid, msg_id)
             except Exception as e:
                 logger.warning(f"Не удалось удалить сообщение {msg_id}: {e}")
-        s["message_ids"] = []  # Очищаем список
+        s["message_ids"] = []
 
 def delete_last(cid):
     s = sessions.get(cid)
     if s and s.get("last"):
         try:
             bot.delete_message(cid, s["last"])
-        except:
+        except Exception:
             pass
         s["last"] = None
 
-# ====================== Основные шаги ======================
 def ask_profile(cid):
     ensure_session(cid)
     delete_last(cid)
     prof = profiles.get(cid)
     kb = types.InlineKeyboardMarkup(row_width=2)
     if prof:
-        kb.add(types.InlineKeyboardButton(f"Использовать: {prof['name']}", callback_data="PF|use"))
+        kb.add(types.InlineKeyboardButton(f"Использовать: {prof.get('name','Не указано')}", callback_data="PF|use"))
     kb.add(types.InlineKeyboardButton("Новый профиль", callback_data="PF|new"))
     msg = safe_send(cid, "👤 Профиль клиента:", reply_markup=kb)
     if msg:
-        s = sessions[cid]
-        s["last"] = msg.message_id
+        sessions[cid]["last"] = msg.message_id
 
 def ask_category(cid):
     ensure_session(cid)
@@ -191,24 +201,22 @@ def show_summary(cid):
     lines = [
         f"📝 Заявка от {datetime.now():%Y-%m-%d %H:%M}",
         f"user_id: [ {cid} ](tg://user?id={cid})",
-        f"ФИО: {prof['name']}",
-        f"Телефон: {prof['phone']}",
-        f"Категория: {SERVICES[s['cat']]['title']}"
+        f"ФИО: {escape_markdown(prof['name'])}",
+        f"Телефон: {escape_markdown(prof['phone'])}",
+        f"Категория: {escape_markdown(SERVICES[s['cat']]['title'])}"
     ]
     for k,v in s["answers"].items():
-        lines.append(f"- {k}: {v}")
+        lines.append(f"- {escape_markdown(k)}: {escape_markdown(v)}")
     text = "\n".join(lines)
 
     wa_text = quote(text)
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("📩 Отправить в WhatsApp менеджеру", url=f"https://wa.me/{WHATSAPP.lstrip('+')}?text={wa_text}"))
-    safe_send(cid, text, parse_mode="Markdown", reply_markup=kb)
-    safe_send(MANAGER_ID, text, parse_mode="Markdown")
+    safe_send(cid, text, parse_mode="MarkdownV2", reply_markup=kb)
+    safe_send(MANAGER_ID, text, parse_mode="MarkdownV2")
 
-    # "Сгорание" предыдущих сообщений после анкеты
     delete_previous_messages(cid)
 
-# ====================== Хендлеры ======================
 @bot.message_handler(commands=["start","help"])
 def handle_start(m):
     ensure_session(m.chat.id)
@@ -245,7 +253,7 @@ def handle_callback(c):
     elif cmd == "F":
         if s["idx"] >= len(SERVICES[s["cat"]]["fields"]):
             show_summary(cid)
-            return  # Избегаем IndexError
+            return
         field = SERVICES[s["cat"]]["fields"][s["idx"]]
         s["answers"][field["text"]] = val
         if field["key"] == "brand":
@@ -271,6 +279,7 @@ def handle_message(m):
     ensure_session(cid)
     s = sessions[cid]
 
+    # Ввод ФИО и телефона для нового профиля
     if s["step"] == "input_fio":
         fio = m.text.strip()
         if len(fio) < 5:
@@ -291,7 +300,6 @@ def handle_message(m):
     else:
         safe_send(cid, "Пожалуйста, используйте кнопки для навигации.")
 
-# ====================== Запуск ======================
 if __name__ == "__main__":
     logger.info("Бот запущен")
     bot.delete_webhook()
