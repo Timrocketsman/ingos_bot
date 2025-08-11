@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Ингосстрах: Telegram-бот для менеджера
-v1.7: Исправлен MarkdownV2 с экранированием, удалена очистка сообщений, фикс 409 конфликта
+v1.7: Исправлен вид анкеты, добавлено приветствие, экранирование MarkdownV2
 """
 
 import logging
@@ -206,8 +206,10 @@ def show_summary(cid):
 
 @bot.message_handler(commands=["start","help"])
 def handle_start(m):
-    ensure_session(m.chat.id)
-    ask_profile(m.chat.id)
+    cid = m.chat.id
+    ensure_session(cid)
+    safe_send(cid, "Добро пожаловать в бот СПАО «Ингосстрах»! Давайте оформим заявку.")
+    ask_profile(cid)
 
 @bot.callback_query_handler(func=lambda c: True)
 def handle_callback(c):
