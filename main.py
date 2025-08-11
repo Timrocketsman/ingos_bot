@@ -2,24 +2,22 @@
 # -*- coding: utf-8 -*-
 """
 Ингосстрах: Telegram-бот для менеджера
-v1.3: Устойчивый polling, автоперезапуск, расширенный перечень услуг
+v1.4: Добавлен ввод реальных данных профиля (ФИО, телефон) с валидацией
 """
 
 import logging
 import time
+import re  # Для валидации телефона
 from datetime import datetime
 from urllib.parse import quote
 
 from telebot import TeleBot, types
 from telebot.apihelper import ApiTelegramException
-# import telebot.apihelper as apihelper  # Прокси, расскомментировать при необходимости
 
 # ====================== Конфигурация ======================
 TOKEN      = "7373585495:AAEK4JwHdbHzfQwfr2zNNknZDwpObCnPXZ0"
 WHATSAPP   = "+79898325577"       # WhatsApp менеджера
-MANAGER_ID = 6983437462           # Telegram ID менеджера для копий заявок
-
-# apihelper.proxy = {'https': 'socks5://user:pass@ip:port'}  # Пример прокси
+MANAGER_ID = 6983437462           # Telegram ID менеджера для копий
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -36,7 +34,7 @@ SERVICES = {
         "title": "Автострахование 🚗",
         "fields": [
             {"key":"brand","text":"Марка автомобиля","opts":['LADA', 'Hyundai', 'Toyota', 'Kia', 'Volkswagen', 'Renault', 'Skoda', 'BMW', 'Mercedes', 'Audi', 'Ford', 'Nissan', 'Другая']},
-            {"key":"model","text":"Модель","dynamic": True},  # динамические варианты из CAR_MODELS
+            {"key":"model","text":"Модель","dynamic": True},
             {"key":"year","text":"Год выпуска","opts":["2025","2024","2023","2022","2021","2020","2019","2018","2017","2016","2015","2014","2013","2012","2011","2010","Другой"]},
             {"key":"body","text":"Тип кузова","opts":["Седан","Хэтчбек","Универсал","Кроссовер","Внедорожник","Другое"]},
             {"key":"engine","text":"Тип двигателя","opts":["Бензин","Дизель","Электро","Гибрид"]},
@@ -101,7 +99,7 @@ CAR_MODELS = {
 # ====================== Вспомогательные функции ======================
 def ensure_session(cid):
     if cid not in sessions:
-        sessions[cid] = {"step": "profile", "cat": None, "idx": 0, "answers": {}, "last": None, "temp_brand": None}
+        sessions[cid] = {"step": "profile", "cat": None, "idx": 0, "answers": {}, "last": None, "temp_brand": None, "input_state": None}
 
 def safe_send(cid, *a, **kw):
     for _ in range(3):
@@ -128,6 +126,8 @@ def delete_last(cid):
 def ask_profile(cid):
     ensure_session(cid)
     delete_last(cid)
+    s = sessions[cid]
+    s["input_state"] = None  # Сброс состояния ввода
     prof = profiles.get(cid)
     kb = types.InlineKeyboardMarkup(row_width=2)
     if prof:
@@ -135,7 +135,7 @@ def ask_profile(cid):
     kb.add(types.InlineKeyboardButton("Новый профиль", callback_data="PF|new"))
     msg = safe_send(cid, "👤 Профиль клиента:", reply_markup=kb)
     if msg:
-        sessions[cid]["last"] = msg.message_id
+        s["last"] = msg.message_id
 
 def ask_category(cid):
     ensure_session(cid)
@@ -146,6 +146,20 @@ def ask_category(cid):
     msg = safe_send(cid, "🏛️ Выберите категорию страхования:", reply_markup=kb)
     if msg:
         sessions[cid]["last"] = msg.message_id
+
+def ask_name(cid):
+    delete_last(cid)
+    msg = safe_send(cid, "Введите ФИО клиента:")
+    if msg:
+        sessions[cid]["last"] = msg.message_id
+        sessions[cid]["input_state"] = "waiting_for_name"
+
+def ask_phone(cid):
+    delete_last(cid)
+    msg = safe_send(cid, "Введите номер телефона клиента (формат: +7XXXXXXXXXX):")
+    if msg:
+        sessions[cid]["last"] = msg.message_id
+        sessions[cid]["input_state"] = "waiting_for_phone"
 
 def ask_field(cid):
     s = sessions[cid]
@@ -158,7 +172,6 @@ def ask_field(cid):
     field = fields[idx]
     kb = types.InlineKeyboardMarkup(row_width=3)
 
-    # Динамические модели по марке
     if field.get("dynamic") and field["key"] == "model":
         brand = s.get("temp_brand")
         opts = CAR_MODELS.get(brand, CAR_MODELS['Другая'])
@@ -176,8 +189,10 @@ def ask_field(cid):
 def show_summary(cid):
     delete_last(cid)
     s = sessions[cid]
+    prof = profiles.get(cid, {"name": "Не указан", "phone": "Не указан"})
     lines = [
         f"📝 Заявка от {datetime.now():%Y-%m-%d %H:%M}",
+        f"Клиент: {prof['name']} ({prof['phone']})",
         f"Категория: {SERVICES[s['cat']]['title']}"
     ]
     for k, v in s["answers"].items():
@@ -196,6 +211,31 @@ def handle_start(m):
     ensure_session(m.chat.id)
     ask_profile(m.chat.id)
 
+@bot.message_handler(func=lambda m: True)
+def handle_text(m):
+    cid = m.chat.id
+    s = sessions.get(cid)
+    if not s:
+        return
+
+    input_state = s.get("input_state")
+    if input_state == "waiting_for_name":
+        name = m.text.strip()
+        if len(name) < 3:
+            safe_send(cid, "ФИО должно быть не короче 3 символов. Попробуйте снова:")
+            return
+        profiles[cid] = {"name": name, "phone": None}
+        ask_phone(cid)
+    elif input_state == "waiting_for_phone":
+        phone = m.text.strip()
+        if not re.match(r'^\+7\d{10}$', phone):
+            safe_send(cid, "Номер должен быть в формате +7XXXXXXXXXX. Попробуйте снова:")
+            return
+        profiles[cid]["phone"] = phone
+        s["input_state"] = None
+        s["step"] = "category"
+        ask_category(cid)
+
 @bot.callback_query_handler(func=lambda c: True)
 def handle_callback(c):
     cid = c.message.chat.id
@@ -211,9 +251,8 @@ def handle_callback(c):
             s["step"] = "category"
             ask_category(cid)
         elif val == "new":
-            profiles[cid] = {"name": "Иван Иванов", "phone": "+7XXXXXXXXXX"}
-            s["step"] = "category"
-            ask_category(cid)
+            s["step"] = "profile_new"
+            ask_name(cid)
         else:
             ask_profile(cid)
 
@@ -228,11 +267,8 @@ def handle_callback(c):
     elif cmd == "F":
         field = SERVICES[s["cat"]]["fields"][s["idx"]]
         s["answers"][field["text"]] = val
-
-        # Сохраняем бренд для динамической модели
         if field["key"] == "brand":
             s["temp_brand"] = val
-
         s["idx"] += 1
         ask_field(cid)
 
