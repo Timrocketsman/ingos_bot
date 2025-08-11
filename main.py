@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 from telebot import TeleBot, types
 from telebot.apihelper import ApiTelegramException
-# import telebot.apihelper as apihelper  # Для прокси, если нужно
+# import telebot.apihelper as apihelper  # Для прокси, расскомментируйте если нужно
 
 # ====================== Конфигурация ======================
 TOKEN      = "7373585495:AAEK4JwHdbHzfQwfr2zNNknZDwpObCnPXZ0"  # Ваш новый токен
@@ -113,9 +113,6 @@ def safe_send(cid, *a, **kw):
         except ApiTelegramException as e:
             logger.warning(f"send_message API error: {e}")
             time.sleep(1)
-        except Exception as e:
-            logger.error(f"send_message unexpected: {e}")
-            time.sleep(1)
     return None
 
 def delete_last(cid):
@@ -123,7 +120,7 @@ def delete_last(cid):
     if s and s.get("last"):
         try:
             bot.delete_message(cid, s["last"])
-        except Exception:
+        except:
             pass
         s["last"] = None
 
@@ -161,7 +158,6 @@ def ask_field(cid):
     field = fields[idx]
     kb = types.InlineKeyboardMarkup(row_width=3)
 
-    # Динамические модели по марке
     if field.get("dynamic") and field["key"] == "model":
         brand = s.get("temp_brand")
         opts = CAR_MODELS.get(brand, CAR_MODELS['Другая'])
@@ -249,7 +245,7 @@ def handle_callback(c):
     bot.answer_callback_query(c.id)
 
 # ====================== Запуск ======================
-if __name__ == "__main__":
+if __name__== "__main__":
     logger.info("Бот запущен")
     bot.delete_webhook()
     retries = 0
