@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Ингосстрах: Telegram-бот для менеджера
-v1.6: Экран MarkdownV2 с экранированием, активная ссылка user_id, очистка сообщений
+v1.6: Исправлен parse_mode MarkdownV2 с экранированием, активная ссылка user_id, очистка сообщений
 """
 
 import logging
@@ -100,7 +100,7 @@ CAR_MODELS = {
     'Другая': ['Другая']
 }
 
-def escape_markdown(text):
+def escape_markdown(text: str) -> str:
     escape_chars = r'_*\[\]()~`>#+-=|{}.!'
     return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
 
@@ -135,7 +135,7 @@ def delete_previous_messages(cid):
             try:
                 bot.delete_message(cid, msg_id)
             except Exception as e:
-                logger.warning(f"Не удалось удалить сообщение {msg_id}: {e}")
+                logger.warning(f"Failed to delete message {msg_id}: {e}")
         s["message_ids"] = []
 
 def delete_last(cid):
@@ -143,7 +143,7 @@ def delete_last(cid):
     if s and s.get("last"):
         try:
             bot.delete_message(cid, s["last"])
-        except Exception:
+        except:
             pass
         s["last"] = None
 
@@ -215,6 +215,7 @@ def show_summary(cid):
     safe_send(cid, text, parse_mode="MarkdownV2", reply_markup=kb)
     safe_send(MANAGER_ID, text, parse_mode="MarkdownV2")
 
+    # Очистка сообщений, чтобы чат не засорялся
     delete_previous_messages(cid)
 
 @bot.message_handler(commands=["start","help"])
@@ -251,6 +252,7 @@ def handle_callback(c):
         ask_field(cid)
 
     elif cmd == "F":
+        # Защита от выхода за границы списка
         if s["idx"] >= len(SERVICES[s["cat"]]["fields"]):
             show_summary(cid)
             return
@@ -279,7 +281,6 @@ def handle_message(m):
     ensure_session(cid)
     s = sessions[cid]
 
-    # Ввод ФИО и телефона для нового профиля
     if s["step"] == "input_fio":
         fio = m.text.strip()
         if len(fio) < 5:
@@ -300,9 +301,12 @@ def handle_message(m):
     else:
         safe_send(cid, "Пожалуйста, используйте кнопки для навигации.")
 
-if __name__ == "__main__":
+if __name__== "__main__":
     logger.info("Бот запущен")
-    bot.delete_webhook()
+    try:
+        bot.delete_webhook()
+    except Exception:
+        pass
     retries = 0
     max_retries = 20
     base_delay = 5
