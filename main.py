@@ -2,14 +2,13 @@
 # -*- coding: utf-8 -*-
 """
 Ингосстрах: Telegram-бот для менеджера
-v1.8: Ссылка на аккаунт в формате http://t.me/username, исправлен вид анкеты, приветствие
+v1.9: Финальная версия с исправленным отображением данных клиента, приветствием и всеми правками
 """
 
 import logging
 import time
 from datetime import datetime
 from urllib.parse import quote
-import re
 
 from telebot import TeleBot, types
 from telebot.apihelper import ApiTelegramException
@@ -17,7 +16,7 @@ from telebot.apihelper import ApiTelegramException
 # ====================== Конфигурация ======================
 TOKEN      = "7373585495:AAEK4JwHdbHzfQwfr2zNNknZDwpObCnPXZ0"
 WHATSAPP   = "+79898325577"       # WhatsApp менеджера
-MANAGER_ID = 6983437462           # Telegram ID менеджера
+MANAGER_ID = 6983437462           # Telegram ID менеджера для копий
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -100,9 +99,16 @@ CAR_MODELS = {
     'Другая': ['Другая']
 }
 
-def escape_markdown(text: str) -> str:
-    escape_chars = r'_*\[\]()~`>#+-=|{}.!'
-    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
+def get_user_link(cid):
+    try:
+        user = bot.get_chat(cid)
+        if user.username:
+            return f"http://t.me/{user.username}"
+        else:
+            return f"http://t.me/{cid}"  # Fallback для chat_id
+    except Exception as e:
+        logger.warning(f"Не удалось получить username: {e}")
+        return f"http://t.me/{cid}"
 
 def ensure_session(cid):
     if cid not in sessions:
@@ -185,9 +191,10 @@ def show_summary(cid):
     delete_last(cid)
     s = sessions[cid]
     prof = profiles.get(cid, {"name": "Не указано", "phone": "Не указано"})
+    user_link = get_user_link(cid)
     lines = [
         f"📝 Заявка от {datetime.now():%Y-%m-%d %H:%M}",
-        f"user_id: [ {cid} ](tg://user?id={cid})",
+        f"Аккаунт: {user_link}",
         f"ФИО: {prof['name']}",
         f"Телефон: {prof['phone']}",
         f"Категория: {SERVICES[s['cat']]['title']}"
@@ -196,13 +203,11 @@ def show_summary(cid):
         lines.append(f"- {k}: {v}")
     text = "\n".join(lines)
 
-    escaped_text = escape_markdown(text)
-
     wa_text = quote(text)
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("📩 Отправить в WhatsApp менеджеру", url=f"https://wa.me/{WHATSAPP.lstrip('+')}?text={wa_text}"))
-    safe_send(cid, escaped_text, parse_mode="MarkdownV2", reply_markup=kb)
-    safe_send(MANAGER_ID, escaped_text, parse_mode="MarkdownV2")
+    safe_send(cid, text, reply_markup=kb)
+    safe_send(MANAGER_ID, text)
 
 @bot.message_handler(commands=["start","help"])
 def handle_start(m):
