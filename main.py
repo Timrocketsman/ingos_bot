@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Ингосстрах: Telegram-бот для менеджера
-v1.5: Добавлен ввод и вывод user_id, ФИО, телефона в заявке
+v1.5: Добавлен ввод ФИО и телефона с валидацией, отображение в анкете
 """
 
 import logging
@@ -32,7 +32,7 @@ bot = TeleBot(TOKEN)
 sessions = {}   # chat_id -> session dict
 profiles = {}   # chat_id -> profile dict
 
-# ====================== Каталог услуг (расширенный) ======================
+# ====================== Каталог услуг ======================
 SERVICES = {
     "auto": {
         "title": "Автострахование 🚗",
@@ -213,9 +213,8 @@ def handle_callback(c):
             s["step"] = "category"
             ask_category(cid)
         elif val == "new":
-            profiles[cid] = {"name": "Иван Иванов", "phone": "+7XXXXXXXXXX"}
-            s["step"] = "category"
-            ask_category(cid)
+            s["step"] = "input_fio"
+            safe_send(cid, "Введите ФИО клиента:")
         else:
             ask_profile(cid)
 
@@ -247,8 +246,34 @@ def handle_callback(c):
 
     bot.answer_callback_query(c.id)
 
+@bot.message_handler(func=lambda m: True)
+def handle_message(m):
+    cid = m.chat.id
+    ensure_session(cid)
+    s = sessions[cid]
+
+    if s["step"] == "input_fio":
+        fio = m.text.strip()
+        if len(fio) < 5:
+            safe_send(cid, "ФИО должно быть полным (минимум 5 символов). Попробуйте снова.")
+            return
+        profiles[cid] = {"name": fio}
+        s["step"] = "input_phone"
+        safe_send(cid, "Введите телефон клиента (формат: +7XXXXXXXXXX):")
+    elif s["step"] == "input_phone":
+        phone = m.text.strip()
+        if not phone.startswith("+7") or len(phone) != 12 or not phone[2:].isdigit():
+            safe_send(cid, "Неверный формат. Введите телефон в формате +7XXXXXXXXXX:")
+            return
+        profiles[cid]["phone"] = phone
+        s["step"] = "category"
+        safe_send(cid, "Профиль сохранён. Теперь выберите категорию.")
+        ask_category(cid)
+    else:
+        safe_send(cid, "Пожалуйста, используйте кнопки для навигации.")
+
 # ====================== Запуск ======================
-if __name__== "__main__":
+if __name__ == "__main__":
     logger.info("Бот запущен")
     bot.delete_webhook()
     retries = 0
