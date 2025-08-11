@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Ингосстрах: Telegram-бот для менеджера
-v1.4: Устойчивый polling, автоперезапуск, расширенный перечень услуг, проверка токена
+v1.5: Добавлен ввод и вывод user_id, ФИО, телефона в заявке
 """
 
 import logging
@@ -12,19 +12,18 @@ from urllib.parse import quote
 
 from telebot import TeleBot, types
 from telebot.apihelper import ApiTelegramException
-# import telebot.apihelper as apihelper  # Для прокси, расскомментируйте если нужно
 
 # ====================== Конфигурация ======================
-TOKEN      = "7373585495:AAEK4JwHdbHzfQwfr2zNNknZDwpObCnPXZ0"  # Ваш новый токен
+TOKEN      = "7373585495:AAEK4JwHdbHzfQwfr2zNNknZDwpObCnPXZ0"
 WHATSAPP   = "+79898325577"       # WhatsApp менеджера
 MANAGER_ID = 6983437462           # Telegram ID менеджера для копий
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# Проверка токена перед запуском
+# Проверка токена
 if ':' not in TOKEN:
-    logger.critical("Ошибка: Токен не содержит двоеточия! Укажите полный токен вида 'ID:Ключ'.")
+    logger.critical("Ошибка: Токен не содержит двоеточия! Укажите полный токен.")
     exit(1)
 
 bot = TeleBot(TOKEN)
@@ -33,7 +32,7 @@ bot = TeleBot(TOKEN)
 sessions = {}   # chat_id -> session dict
 profiles = {}   # chat_id -> profile dict
 
-# ====================== Расширенный каталог услуг ======================
+# ====================== Каталог услуг (расширенный) ======================
 SERVICES = {
     "auto": {
         "title": "Автострахование 🚗",
@@ -104,7 +103,7 @@ CAR_MODELS = {
 # ====================== Вспомогательные функции ======================
 def ensure_session(cid):
     if cid not in sessions:
-        sessions[cid] = {"step": "profile", "cat": None, "idx": 0, "answers": {}, "last": None, "temp_brand": None}
+        sessions[cid] = {"step": "profile", "cat": None, "idx": 0, "answers": {}, "last": None, "temp_brand": None, "pending_input": None}
 
 def safe_send(cid, *a, **kw):
     for _ in range(3):
@@ -175,8 +174,12 @@ def ask_field(cid):
 def show_summary(cid):
     delete_last(cid)
     s = sessions[cid]
+    prof = profiles.get(cid, {"name": "Не указано", "phone": "Не указано"})
     lines = [
         f"📝 Заявка от {datetime.now():%Y-%m-%d %H:%M}",
+        f"user_id: {cid}",
+        f"ФИО: {prof['name']}",
+        f"Телефон: {prof['phone']}",
         f"Категория: {SERVICES[s['cat']]['title']}"
     ]
     for k,v in s["answers"].items():
