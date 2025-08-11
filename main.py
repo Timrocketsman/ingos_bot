@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Ингосстрах: Telegram-бот для менеджера
-v1.5: Добавлен ввод ФИО и телефона с валидацией, отображение в анкете
+v1.6: Активная ссылка на user_id в анкете, ввод ФИО/телефона, расширенные услуги
 """
 
 import logging
@@ -177,7 +177,7 @@ def show_summary(cid):
     prof = profiles.get(cid, {"name": "Не указано", "phone": "Не указано"})
     lines = [
         f"📝 Заявка от {datetime.now():%Y-%m-%d %H:%M}",
-        f"user_id: {cid}",
+        f"user_id: [ {cid} ](tg://user?id={cid})",
         f"ФИО: {prof['name']}",
         f"Телефон: {prof['phone']}",
         f"Категория: {SERVICES[s['cat']]['title']}"
@@ -189,8 +189,8 @@ def show_summary(cid):
     wa_text = quote(text)
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("📩 Отправить в WhatsApp менеджеру", url=f"https://wa.me/{WHATSAPP.lstrip('+')}?text={wa_text}"))
-    safe_send(cid, text, reply_markup=kb)
-    safe_send(MANAGER_ID, f"Новая заявка:\n{text}")
+    safe_send(cid, text, parse_mode="Markdown", reply_markup=kb)
+    safe_send(MANAGER_ID, text, parse_mode="Markdown")
 
 # ====================== Хендлеры ======================
 @bot.message_handler(commands=["start","help"])
