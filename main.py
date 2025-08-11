@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Ингосстрах: Telegram-бот для менеджера
-v1.6: Активная ссылка на user_id в анкете, ввод ФИО/телефона, расширенные услуги
+v1.6: Исправлен IndexError, добавлено удаление предыдущих сообщений после анкеты
 """
 
 import logging
@@ -103,16 +103,28 @@ CAR_MODELS = {
 # ====================== Вспомогательные функции ======================
 def ensure_session(cid):
     if cid not in sessions:
-        sessions[cid] = {"step": "profile", "cat": None, "idx": 0, "answers": {}, "last": None, "temp_brand": None, "pending_input": None}
+        sessions[cid] = {"step": "profile", "cat": None, "idx": 0, "answers": {}, "last": None, "temp_brand": None, "pending_input": None, "message_ids": []}  # Добавлен список для IDs сообщений
 
 def safe_send(cid, *a, **kw):
     for _ in range(3):
         try:
-            return bot.send_message(cid, *a, **kw)
+            msg = bot.send_message(cid, *a, **kw)
+            sessions.get(cid, {})["message_ids"].append(msg.message_id)  # Сохраняем ID сообщения для последующего удаления
+            return msg
         except ApiTelegramException as e:
             logger.warning(f"send_message API error: {e}")
             time.sleep(1)
     return None
+
+def delete_previous_messages(cid):
+    s = sessions.get(cid)
+    if s and s.get("message_ids"):
+        for msg_id in s["message_ids"]:
+            try:
+                bot.delete_message(cid, msg_id)
+            except Exception as e:
+                logger.warning(f"Не удалось удалить сообщение {msg_id}: {e}")
+        s["message_ids"] = []  # Очищаем список
 
 def delete_last(cid):
     s = sessions.get(cid)
@@ -134,7 +146,8 @@ def ask_profile(cid):
     kb.add(types.InlineKeyboardButton("Новый профиль", callback_data="PF|new"))
     msg = safe_send(cid, "👤 Профиль клиента:", reply_markup=kb)
     if msg:
-        sessions[cid]["last"] = msg.message_id
+        s = sessions[cid]
+        s["last"] = msg.message_id
 
 def ask_category(cid):
     ensure_session(cid)
@@ -192,6 +205,9 @@ def show_summary(cid):
     safe_send(cid, text, parse_mode="Markdown", reply_markup=kb)
     safe_send(MANAGER_ID, text, parse_mode="Markdown")
 
+    # "Сгорание" предыдущих сообщений после анкеты
+    delete_previous_messages(cid)
+
 # ====================== Хендлеры ======================
 @bot.message_handler(commands=["start","help"])
 def handle_start(m):
@@ -227,6 +243,9 @@ def handle_callback(c):
         ask_field(cid)
 
     elif cmd == "F":
+        if s["idx"] >= len(SERVICES[s["cat"]]["fields"]):
+            show_summary(cid)
+            return  # Избегаем IndexError
         field = SERVICES[s["cat"]]["fields"][s["idx"]]
         s["answers"][field["text"]] = val
         if field["key"] == "brand":
