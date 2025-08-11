@@ -12,14 +12,14 @@ from urllib.parse import quote
 
 from telebot import TeleBot, types
 from telebot.apihelper import ApiTelegramException
-import telebot.apihelper as apihelper  # Для прокси, расскомментируйте и заполните если нужно
+# import telebot.apihelper as apihelper  # Прокси, расскомментировать при необходимости
 
 # ====================== Конфигурация ======================
-TOKEN      = "7373585495:AAETFfffmmyzUOCklPeMSRht7LueleUn9h0"
+TOKEN      = "7373585495:AAEK4JwHdbHzfQwfr2zNNknZDwpObCnPXZ0"
 WHATSAPP   = "+79898325577"       # WhatsApp менеджера
-MANAGER_ID = 6983437462           # Telegram ID менеджера для копий
+MANAGER_ID = 6983437462           # Telegram ID менеджера для копий заявок
 
-# apihelper.proxy = {'https': 'socks5://user:pass@ip:port'}  # Если нужна прокси
+# apihelper.proxy = {'https': 'socks5://user:pass@ip:port'}  # Пример прокси
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ bot = TeleBot(TOKEN)
 sessions = {}   # chat_id -> session dict
 profiles = {}   # chat_id -> profile dict
 
-# ====================== Расширенный каталог услуг ======================
+# ====================== Каталог услуг ======================
 SERVICES = {
     "auto": {
         "title": "Автострахование 🚗",
@@ -48,8 +48,9 @@ SERVICES = {
     "life": {
         "title": "Страхование жизни 👤",
         "fields": [
-            {"key":"sum","text":"Сумма","opts":["500k","1M","2M"]},
-            {"key":"age","text":"Возраст","opts":["18–30","31–50","51+"]}
+            {"key":"sum","text":"Сумма страхования","opts":["500k","1M","2M","5M","10M"]},
+            {"key":"age","text":"Возраст","opts":["18–30","31–50","51+"]},
+            {"key":"period","text":"Срок","opts":["5 лет","10 лет","15 лет","до 65 лет"]}
         ]
     },
     "health": {
@@ -57,23 +58,26 @@ SERVICES = {
         "fields": [
             {"key":"program","text":"Программа","opts":["Базовая","Расширенная","VIP"]},
             {"key":"age","text":"Возраст","opts":["18–30","31–50","51+"]},
-            {"key":"region","text":"Регион","opts":["Москва","СПб","Другой"]}
+            {"key":"region","text":"Регион обслуживания","opts":["Москва","СПб","Другой"]},
+            {"key":"dentistry","text":"Стоматология","opts":["Не нужна","Базовая","Расширенная","VIP"]}
         ]
     },
     "property": {
         "title": "Страхование имущества 🏠",
         "fields": [
-            {"key":"type","text":"Тип имущества","opts":["Квартира","Дом","Дача","Другое"]},
-            {"key":"value","text":"Стоимость","opts":["<1M","1M–5M",">5M"]},
-            {"key":"address","text":"Адрес","opts":["Городской","Загородный"]}
+            {"key":"type","text":"Тип имущества","opts":["Квартира","Дом","Дача","Коммерческая"]},
+            {"key":"value","text":"Страховая стоимость","opts":["<1M","1M–5M","5M–10M",">10M"]},
+            {"key":"address","text":"Локация","opts":["Город","Загород","Другое"]},
+            {"key":"risks","text":"Риски","opts":["Базовые","+Затопление","+Кража","Полное покрытие"]}
         ]
     },
     "travel": {
         "title": "Страхование путешествий ✈️",
         "fields": [
-            {"key":"destination","text":"Направление","opts":["Европа","Азия","Россия","Другое"]},
-            {"key":"duration","text":"Срок","opts":["<7 дней","7–14 дней",">14 дней"]},
-            {"key":"type","text":"Тип поездки","opts":["Отдых","Бизнес","Спорт"]}
+            {"key":"destination","text":"Направление","opts":["Европа","Азия","Россия","Америка","Другое"]},
+            {"key":"duration","text":"Срок поездки","opts":["<7 дней","7–14 дней","15–30 дней",">30 дней"]},
+            {"key":"purpose","text":"Цель","opts":["Отдых","Бизнес","Спорт","Учёба"]},
+            {"key":"coverage","text":"Покрытие","opts":["35k EUR","50k EUR","100k EUR","Без ограничений"]}
         ]
     }
 }
@@ -99,7 +103,26 @@ def ensure_session(cid):
     if cid not in sessions:
         sessions[cid] = {"step": "profile", "cat": None, "idx": 0, "answers": {}, "last": None, "temp_brand": None}
 
-# ... (safe_send и delete_last остаются без изменений, как в вашем коде)
+def safe_send(cid, *a, **kw):
+    for _ in range(3):
+        try:
+            return bot.send_message(cid, *a, **kw)
+        except ApiTelegramException as e:
+            logger.warning(f"send_message API error: {e}")
+            time.sleep(1)
+        except Exception as e:
+            logger.error(f"send_message unexpected: {e}")
+            time.sleep(1)
+    return None
+
+def delete_last(cid):
+    s = sessions.get(cid)
+    if s and s.get("last"):
+        try:
+            bot.delete_message(cid, s["last"])
+        except Exception:
+            pass
+        s["last"] = None
 
 # ====================== Основные шаги ======================
 def ask_profile(cid):
@@ -135,7 +158,7 @@ def ask_field(cid):
     field = fields[idx]
     kb = types.InlineKeyboardMarkup(row_width=3)
 
-    # Если поле динамическое "model" — подгружаем варианты по выбранной марке авто
+    # Динамические модели по марке
     if field.get("dynamic") and field["key"] == "model":
         brand = s.get("temp_brand")
         opts = CAR_MODELS.get(brand, CAR_MODELS['Другая'])
@@ -145,7 +168,6 @@ def ask_field(cid):
     for opt in opts:
         kb.add(types.InlineKeyboardButton(opt, callback_data=f"F|{opt}"))
 
-    # Кнопка назад
     kb.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="BACK"))
     msg = safe_send(cid, f"Шаг {idx+1}/{len(fields)} — {field['text']}:", reply_markup=kb)
     if msg:
@@ -158,7 +180,7 @@ def show_summary(cid):
         f"📝 Заявка от {datetime.now():%Y-%m-%d %H:%M}",
         f"Категория: {SERVICES[s['cat']]['title']}"
     ]
-    for k,v in s["answers"].items():
+    for k, v in s["answers"].items():
         lines.append(f"- {k}: {v}")
     text = "\n".join(lines)
 
@@ -189,7 +211,6 @@ def handle_callback(c):
             s["step"] = "category"
             ask_category(cid)
         elif val == "new":
-            # Можно расширить до полноценного ввода профиля
             profiles[cid] = {"name": "Иван Иванов", "phone": "+7XXXXXXXXXX"}
             s["step"] = "category"
             ask_category(cid)
@@ -206,11 +227,9 @@ def handle_callback(c):
 
     elif cmd == "F":
         field = SERVICES[s["cat"]]["fields"][s["idx"]]
-
-        # Сохраняем выбор
         s["answers"][field["text"]] = val
 
-        # Если поле марка авто — сохраняем бренд для динамической подгрузки моделей
+        # Сохраняем бренд для динамической модели
         if field["key"] == "brand":
             s["temp_brand"] = val
 
@@ -220,7 +239,6 @@ def handle_callback(c):
     elif cmd == "BACK":
         if s["idx"] > 0:
             s["idx"] -= 1
-            # При возврате назад удаляем ответ, если нужно
             field = SERVICES[s["cat"]]["fields"][s["idx"]]
             s["answers"].pop(field["text"], None)
             ask_field(cid)
@@ -244,8 +262,8 @@ if __name__== "__main__":
             delay = min(base_delay * (2 ** retries), 300)
             logger.error(f"Ошибка polling: {e}, повтор через {delay} сек.")
             time.sleep(delay)
-            retries +=1
+            retries += 1
         else:
-            retries=0
+            retries = 0
             time.sleep(1)
     logger.critical("Превышено число попыток перезапуска, проверьте сеть и токен.")
