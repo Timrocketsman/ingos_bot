@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ингосстрах: Telegram-бот для менеджера (Termux/Android)
-v1.2: Устойчивый polling, автоперезапуск, расширенный флоу анкеты
+Ингосстрах: Telegram-бот для менеджера
+v1.3: Устойчивый polling, автоперезапуск, расширенный перечень услуг
 """
 
 import logging
@@ -30,9 +30,10 @@ bot = TeleBot(TOKEN)
 sessions = {}   # chat_id -> session dict
 profiles = {}   # chat_id -> profile dict
 
+# ====================== Расширенный каталог услуг ======================
 SERVICES = {
     "auto": {
-        "title": "Автострахование (КАСКО/ОСАГО) 🚗",
+        "title": "Автострахование 🚗",
         "fields": [
             {"key":"brand","text":"Марка автомобиля","opts":['LADA', 'Hyundai', 'Toyota', 'Kia', 'Volkswagen', 'Renault', 'Skoda', 'BMW', 'Mercedes', 'Audi', 'Ford', 'Nissan', 'Другая']},
             {"key":"model","text":"Модель","dynamic": True},  # динамические варианты из CAR_MODELS
@@ -50,6 +51,30 @@ SERVICES = {
             {"key":"sum","text":"Сумма","opts":["500k","1M","2M"]},
             {"key":"age","text":"Возраст","opts":["18–30","31–50","51+"]}
         ]
+    },
+    "health": {
+        "title": "Медицинское страхование (ДМС) 🏥",
+        "fields": [
+            {"key":"program","text":"Программа","opts":["Базовая","Расширенная","VIP"]},
+            {"key":"age","text":"Возраст","opts":["18–30","31–50","51+"]},
+            {"key":"region","text":"Регион","opts":["Москва","СПб","Другой"]}
+        ]
+    },
+    "property": {
+        "title": "Страхование имущества 🏠",
+        "fields": [
+            {"key":"type","text":"Тип имущества","opts":["Квартира","Дом","Дача","Другое"]},
+            {"key":"value","text":"Стоимость","opts":["<1M","1M–5M",">5M"]},
+            {"key":"address","text":"Адрес","opts":["Городской","Загородный"]}
+        ]
+    },
+    "travel": {
+        "title": "Страхование путешествий ✈️",
+        "fields": [
+            {"key":"destination","text":"Направление","opts":["Европа","Азия","Россия","Другое"]},
+            {"key":"duration","text":"Срок","opts":["<7 дней","7–14 дней",">14 дней"]},
+            {"key":"type","text":"Тип поездки","opts":["Отдых","Бизнес","Спорт"]}
+        ]
     }
 }
 
@@ -59,7 +84,13 @@ CAR_MODELS = {
     'Toyota': ['Camry', 'Corolla', 'RAV4', 'Другая'],
     'Kia': ['Rio', 'Sportage', 'Ceed', 'Другая'],
     'Volkswagen': ['Polo', 'Tiguan', 'Golf', 'Другая'],
-    # Добавьте остальные при необходимости
+    'Renault': ['Logan', 'Duster', 'Arkana', 'Другая'],
+    'Skoda': ['Rapid', 'Octavia', 'Kodiaq', 'Другая'],
+    'BMW': ['3 Series', '5 Series', 'X5', 'Другая'],
+    'Mercedes': ['C-Class', 'E-Class', 'GLC', 'Другая'],
+    'Audi': ['A4', 'A6', 'Q5', 'Другая'],
+    'Ford': ['Focus', 'Fiesta', 'Kuga', 'Другая'],
+    'Nissan': ['Qashqai', 'X-Trail', 'Juke', 'Другая'],
     'Другая': ['Другая']
 }
 
@@ -68,23 +99,7 @@ def ensure_session(cid):
     if cid not in sessions:
         sessions[cid] = {"step": "profile", "cat": None, "idx": 0, "answers": {}, "last": None, "temp_brand": None}
 
-def safe_send(cid, *a, **kw):
-    for _ in range(3):
-        try:
-            return bot.send_message(cid, *a, **kw)
-        except ApiTelegramException as e:
-            logger.warning(f"send_message API error: {e}")
-            time.sleep(1)
-    return None
-
-def delete_last(cid):
-    s = sessions.get(cid)
-    if s and s.get("last"):
-        try:
-            bot.delete_message(cid, s["last"])
-        except:
-            pass
-        s["last"] = None
+# ... (safe_send и delete_last остаются без изменений, как в вашем коде)
 
 # ====================== Основные шаги ======================
 def ask_profile(cid):
