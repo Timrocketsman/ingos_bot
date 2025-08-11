@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Ингосстрах: Telegram-бот для менеджера
-v1.6: Исправлен parse_mode MarkdownV2 с экранированием, активная ссылка user_id, очистка сообщений
+v1.7: Исправлен MarkdownV2 с экранированием, удалена очистка сообщений, фикс 409 конфликта
 """
 
 import logging
@@ -113,30 +113,17 @@ def ensure_session(cid):
             "answers": {},
             "last": None,
             "temp_brand": None,
-            "pending_input": None,
-            "message_ids": []
+            "pending_input": None
         }
 
 def safe_send(cid, *a, **kw):
     for _ in range(3):
         try:
-            msg = bot.send_message(cid, *a, **kw)
-            sessions.get(cid, {}).get("message_ids", []).append(msg.message_id)
-            return msg
+            return bot.send_message(cid, *a, **kw)
         except ApiTelegramException as e:
             logger.warning(f"send_message API error: {e}")
             time.sleep(1)
     return None
-
-def delete_previous_messages(cid):
-    s = sessions.get(cid)
-    if s and s.get("message_ids"):
-        for msg_id in s["message_ids"]:
-            try:
-                bot.delete_message(cid, msg_id)
-            except Exception as e:
-                logger.warning(f"Failed to delete message {msg_id}: {e}")
-        s["message_ids"] = []
 
 def delete_last(cid):
     s = sessions.get(cid)
@@ -201,22 +188,21 @@ def show_summary(cid):
     lines = [
         f"📝 Заявка от {datetime.now():%Y-%m-%d %H:%M}",
         f"user_id: [ {cid} ](tg://user?id={cid})",
-        f"ФИО: {escape_markdown(prof['name'])}",
-        f"Телефон: {escape_markdown(prof['phone'])}",
-        f"Категория: {escape_markdown(SERVICES[s['cat']]['title'])}"
+        f"ФИО: {prof['name']}",
+        f"Телефон: {prof['phone']}",
+        f"Категория: {SERVICES[s['cat']]['title']}"
     ]
     for k,v in s["answers"].items():
-        lines.append(f"- {escape_markdown(k)}: {escape_markdown(v)}")
+        lines.append(f"- {k}: {v}")
     text = "\n".join(lines)
+
+    escaped_text = escape_markdown(text)
 
     wa_text = quote(text)
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("📩 Отправить в WhatsApp менеджеру", url=f"https://wa.me/{WHATSAPP.lstrip('+')}?text={wa_text}"))
-    safe_send(cid, text, parse_mode="MarkdownV2", reply_markup=kb)
-    safe_send(MANAGER_ID, text, parse_mode="MarkdownV2")
-
-    # Очистка сообщений, чтобы чат не засорялся
-    delete_previous_messages(cid)
+    safe_send(cid, escaped_text, parse_mode="MarkdownV2", reply_markup=kb)
+    safe_send(MANAGER_ID, escaped_text, parse_mode="MarkdownV2")
 
 @bot.message_handler(commands=["start","help"])
 def handle_start(m):
@@ -252,7 +238,6 @@ def handle_callback(c):
         ask_field(cid)
 
     elif cmd == "F":
-        # Защита от выхода за границы списка
         if s["idx"] >= len(SERVICES[s["cat"]]["fields"]):
             show_summary(cid)
             return
@@ -301,12 +286,9 @@ def handle_message(m):
     else:
         safe_send(cid, "Пожалуйста, используйте кнопки для навигации.")
 
-if __name__== "__main__":
+if __name__ == "__main__":
     logger.info("Бот запущен")
-    try:
-        bot.delete_webhook()
-    except Exception:
-        pass
+    bot.delete_webhook()
     retries = 0
     max_retries = 20
     base_delay = 5
